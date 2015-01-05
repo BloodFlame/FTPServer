@@ -1,7 +1,9 @@
 #include<stdio.h>
 #include<stdlib.h>
+#include<string.h>
 #include<sys/types.h>
 #include<sys/socket.h>
+#include<netinet/in.h>
 #include<fcntl.h>
 #include<pthread.h>
 
@@ -10,11 +12,18 @@
 typedef struct Block
 { 
 	char buf[516];
-	fBlock* next;
+	struct Block *next;
 	int id;
 }fBlock;
+typedef struct ARG
+{
+	int serverfd;
+	struct sockaddr_in clientaddr;
+	int addrlen;
+}Arg;
 
-fBlock* full,empty,sending;
+fBlock *full,*empty,*sending;
+int total = 0;
 
 fBlock*  initblock(int maxsize)
 {
@@ -41,11 +50,11 @@ fBlock*  initblock(int maxsize)
 
 int initsocket(struct sockaddr_in *serveraddr, int *serverfd)
 {
-	serverfd = socket(PF_INET, SOCK_DGRAM, 0);
-	bzero(&serveraddr, sizeof(struct sockaddr_in));
-	serveraddr.sin_family = AF_INET;
-	server.sin_addr.s_addr = htonl(INADDR_ANY);
-	serveraddr.sin_port = htons(SERVER_PORT);
+	*serverfd = socket(PF_INET, SOCK_DGRAM, 0);
+	bzero(serveraddr, sizeof(struct sockaddr_in));
+	serveraddr->sin_family = AF_INET;
+	serveraddr->sin_addr.s_addr = htonl(INADDR_ANY);
+	serveraddr->sin_port = htons(SERVER_PORT);
 	return 0;
 }
 
@@ -78,34 +87,37 @@ int fileread(const int fid, const int id, char block[])
 	return read_num;
 }	
 
-void fload(int fid)
+void fload(void* pfid)
 {
+	int fid = (int)pfid;
 	int read_num;
 	int id = 1;
 	while(1)
 	{
 		while(empty->next == full);
-		read_num = fileread(fid, id++, empty->buf);
+		read_num = fileread(fid, id, empty->buf);
 		if(read_num == 0) break;
-		empty->id = id-1;
+		empty->id = id;
 		empty = empty->next;
+		id++;
 	}
+	total = id-1;
 	return;
 	
 }
 
-void blocksend(void* arg)
+void blocksend(void* parg)
 {
+	Arg* arg = (Arg*)parg;
 	int send_num;
-	int i = 0;
 	while(1)
 	{
 		while(sending == empty);
-		send_num = sendto(arg->serverfd, sending->buf, sizeof(sending->buf), 0, (struct sockaddr*)&arg->clientaddr, &arg->addrlen);
+		while(sending != full);
+		send_num = sendto(arg->serverfd, sending->buf, sizeof(sending->buf), 0, (struct sockaddr*)&arg->clientaddr, arg->addrlen);
 		if(send_num > 0)
 		{
 			printf("Send block [%d] success\n", sending->id);
-			i++;
 			sending = sending->next;
 		}
 		else
@@ -117,8 +129,12 @@ void blocksend(void* arg)
 	return;
 }
 
-int recvACK(void* arg)
+void recvACK(void* parg)
 {
+	Arg* arg = (Arg*) parg;
+	fBlock* fblock;
+	pthread_t pid1, pid2; 
+	int fid;
 	char buf[128];
 	char filename[128];
 	memset(buf, 0, 128);
@@ -131,7 +147,7 @@ int recvACK(void* arg)
 		memset(buf, 0, 128);
 		memset(filename, 0, 128);
 		sprintf(buf,"Can't translate this file\n");
-		sendto(arg->serverfd, buf, 128, 0, (struct sockaddr*)&arg->clientaddr, &arg->addrlen);
+		sendto(arg->serverfd, buf, 128, 0, (struct sockaddr*)&arg->clientaddr, arg->addrlen);
 		memset(buf, 0, 128);
 		recvfrom(arg->serverfd, buf, 128, 0, (struct sockaddr*)&arg->clientaddr, &arg->addrlen);
 		sprintf(filename, "./%s",buf);
@@ -140,37 +156,56 @@ int recvACK(void* arg)
 
 	fblock = initblock(11);
 
-	if(pthread_create(&pid[0], NULL, fload, fid) != OK)
+	if(pthread_create(&pid1, NULL, (void *)fload, (void *)fid) != 0)
 	{
 		printf("Pthread_create fload error\n");
-		return -3;
+		return;
 	}
-	if(pthread_create(&pid[1], NULL, blocksend, arg) != OK)
+	if(pthread_create(&pid2, NULL, (void *)blocksend, (void *)arg) != 0)
 	{
 		printf("Pthread_create blocksend error\n");
-		return -4;
+		return;
 	}
-	memset(buf, 0, 128);
-	while(recvfrom(arg->serverfd, buf, 128, 0, (struct sockaddr*)&arg->clientaddr, &arg->addrlen))
+
+	while(1)
 	{
+		memset(buf, 0, 128);
+		recvfrom(arg->serverfd, buf, 128, 0, (struct sockaddr*)&arg->clientaddr, &arg->addrlen);
 		//How to resend		
+		if (full->id == (int)*buf)
+		{
+			memset(full->buf, 0, sizeof(full->buf));
+			if(full->id == total && total != 0)
+			{
+				full->id = 0;
+				break;
+			}
+			full->id = 0;
+			full = full->next;
+		}
+		else
+		{
+			sending = full;
+		}
 	}
-	
+	printf("Transelate complete!\n");
+	return;
 }
 
 int main(int argc, char** argv)
 {
 	struct sockaddr_in serveraddr;
-	int serverfd, fid;
-	fBlock* fblock;
+	int serverfd;
+	pthread_t pid;
+	Arg arg;
 	initsocket(&serveraddr, &serverfd);
+	arg.serverfd = serverfd;
 	bind(serverfd, (struct sockaddr*)&serveraddr, sizeof(struct sockaddr_in));
-	if(pthread_create(&pid[0], NULL, recvACK, &arg) != OK)
+	if(pthread_create(&pid, NULL, (void*)recvACK, (void*)&arg) != 0)
 	{
 		printf("Pthread_create recvACK error\n");
 		return -2;
 	}
-
+	pthread_join(pid, NULL);
 	return 0;
-
 }
