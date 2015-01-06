@@ -19,6 +19,7 @@ typedef struct ARG
 {
 	int serverfd;
 	struct sockaddr_in clientaddr;
+	struct sockaddr_in *serveraddr;
 	int addrlen;
 }Arg;
 
@@ -61,8 +62,24 @@ int initsocket(struct sockaddr_in *serveraddr, int *serverfd)
 int fileopen(const char filename[])
 {
 	int fid;
+	printf("%s\n", filename);
 	fid = open(filename, O_RDONLY);
 	return fid;
+}
+
+unsigned long get_file_size(const char *path)
+{
+	unsigned long filesize = 0;
+	struct stat statbuff;
+	if(stat(path, &statbuff) < 0)
+	{
+		return filesize;
+	}
+	else
+	{
+		filesize = statbuff.st_size;
+	}
+	return filesize;
 }
 
 int fileread(const int fid, const int id, char block[])
@@ -137,22 +154,46 @@ void recvACK(void* parg)
 	int fid;
 	char buf[128];
 	char filename[128];
+	unsigned long filesize;
+
 	memset(buf, 0, 128);
 	memset(filename, 0, 128);
-	recvfrom(arg->serverfd, buf, 128, 0, (struct sockaddr*)&arg->clientaddr, &arg->addrlen);
+	printf("recv %s from %s is %d\n", buf, inet_ntoa(arg->clientaddr.sin_addr), arg->addrlen);
+
+	int recv_num = recvfrom(arg->serverfd, buf, 128, 0, 
+			(struct sockaddr*)&arg->clientaddr, &arg->addrlen);
+
+	printf("%d\n",recv_num);
+	printf("recv %s from %s is %d\n", buf, inet_ntoa(arg->clientaddr.sin_addr), arg->addrlen);
+
 	sprintf(filename,"./%s",buf);
 	fid = fileopen(filename);
+	
 	while(fid < 0)
 	{
 		memset(buf, 0, 128);
 		memset(filename, 0, 128);
-		sprintf(buf,"Can't translate this file\n");
-		sendto(arg->serverfd, buf, 128, 0, (struct sockaddr*)&arg->clientaddr, arg->addrlen);
+		sprintf(buf,"error");
+		printf("%s\n",buf);
+		printf("%s\n", inet_ntoa(arg->clientaddr.sin_addr));
+		int send_num = sendto(arg->serverfd, "error", 5, 0, 
+				(struct sockaddr*)&arg->clientaddr, sizeof(arg->clientaddr));
+		printf("%d\n", send_num);
+		//sendto(arg->serverfd, buf, 128, 0, NULL, NULL);
 		memset(buf, 0, 128);
-		recvfrom(arg->serverfd, buf, 128, 0, (struct sockaddr*)&arg->clientaddr, &arg->addrlen);
+		printf("sendto complete %s\n",buf);
+		recvfrom(arg->serverfd, buf, 128, 0, 
+				(struct sockaddr*)&arg->clientaddr, &arg->addrlen);
 		sprintf(filename, "./%s",buf);
 		fid = fileopen(filename);
 	}
+
+	filesize = get_file_size(filename);
+	//memset(buf, 0, 128);
+	//sprintf(buf, "%lu", filesize);
+	printf("send filesize %lu\n", filesize);
+	sendto(arg->serverfd, &filesize, sizeof(unsigned long), 0, 
+			(struct sockaddr*)&arg->clientaddr, sizeof(struct sockaddr_in));
 
 	fblock = initblock(11);
 
@@ -170,7 +211,8 @@ void recvACK(void* parg)
 	while(1)
 	{
 		memset(buf, 0, 128);
-		recvfrom(arg->serverfd, buf, 128, 0, (struct sockaddr*)&arg->clientaddr, &arg->addrlen);
+		recvfrom(arg->serverfd, buf, 128, 0, 
+				(struct sockaddr*)&arg->clientaddr, &arg->addrlen);
 		//How to resend		
 		if (full->id == (int)*buf)
 		{
@@ -188,6 +230,8 @@ void recvACK(void* parg)
 			sending = full;
 		}
 	}
+	close(fid);
+	free(fblock);
 	printf("Transelate complete!\n");
 	return;
 }
@@ -200,12 +244,15 @@ int main(int argc, char** argv)
 	Arg arg;
 	initsocket(&serveraddr, &serverfd);
 	arg.serverfd = serverfd;
-	bind(serverfd, (struct sockaddr*)&serveraddr, sizeof(struct sockaddr_in));
+	arg.addrlen = sizeof(struct sockaddr_in);
+	//arg.serveraddr = *serveraddr;
+	bind(serverfd, (struct sockaddr*)&serveraddr, sizeof(serveraddr));
 	if(pthread_create(&pid, NULL, (void*)recvACK, (void*)&arg) != 0)
 	{
 		printf("Pthread_create recvACK error\n");
 		return -2;
 	}
 	pthread_join(pid, NULL);
+	close(serverfd);
 	return 0;
 }

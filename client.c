@@ -125,18 +125,21 @@ void sendACK(void* parg)
 	pthread_t pid1, pid2;
 	int fid;
 	char buf[128];
-	unsigned long filesize = *((unsigned long*)buf);
+	unsigned long filesize;
+	
+	int send_num = sendto(arg->clientfd, arg->filename, 128, 0, 
+			(struct sockaddr*)&arg->serveraddr, sizeof(arg->serveraddr));
+	printf("%d\n", send_num);
+	printf("recvfrom %s \n", inet_ntoa(arg->serveraddr.sin_addr));
+	//memset(buf, 0, 128);
+	printf("%d\n", arg->addrlen);
 
-	sendto(arg->clientfd, arg->filename, sizeof(arg->filename), 0, 
-			(struct sockaddr*)&arg->serveraddr, arg->addrlen);
-	
-	memset(buf, 0, 128);
-	recvfrom(arg->clientfd, buf, 128, 0, 
+	recvfrom(arg->clientfd, &filesize, sizeof(unsigned long), 0, 
 			(struct sockaddr*)&arg->serveraddr, &arg->addrlen);
-	
-	if( strcmp(buf, "Can't translate this file\n") == 0)
+	//recvfrom(arg->clientfd, buf, 128, 0, NULL, NULL);
+	if( strcmp(buf, "error") == 0)
 	{
-		printf("%s",buf);
+		printf("%s\n",buf);
 		return;
 	}
 
@@ -168,7 +171,7 @@ void sendACK(void* parg)
 
 int main(int argc, char** argv)
 {
-	struct sockaddr_in clientaddr;
+	//struct sockaddr_in clientaddr;
 	int clientfd;
 	pthread_t pid;
 	char serverip[50] = "127.0.0.1";
@@ -191,10 +194,22 @@ int main(int argc, char** argv)
 	arg.savepath = argv[2];
 	arg.filename = argv[1];
 	bzero(&arg.serveraddr, sizeof(struct sockaddr_in));
+	//bzero(&clientaddr, sizeof(struct sockaddr_in));
 	arg.serveraddr.sin_family = AF_INET;
 	arg.serveraddr.sin_port = htons(SERVER_PORT);
-	inet_aton(serverip, &arg.serveraddr.sin_addr);
-	
+	arg.serveraddr.sin_addr.s_addr = inet_addr(serverip);
+	arg.addrlen = sizeof(struct sockaddr_in);
+
+	//clientaddr.sin_family =AF_INET;
+	//clientaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+	//clientaddr.sin_port = htons(6001);
+
+	//if(bind(clientfd, (struct sockaddr*)&clientaddr, 
+	//			sizeof(struct sockaddr_in)) < 0)
+	//{
+	//	printf("bind clientfd error\n");
+	//	return 0;
+	//}
 	 
 	if(pthread_create(&pid, NULL, (void*)sendACK, (void*)&arg) != 0)
 	{
