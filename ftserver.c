@@ -1,44 +1,22 @@
-#include<stdio.h>
-#include<stdlib.h>
-#include<string.h>
-#include<sys/types.h>
-#include<sys/socket.h>
-#include<netinet/in.h>
-#include<fcntl.h>
-#include<pthread.h>
+#include "ft.h"
 
-#define SERVER_PORT 6000
+block_buf* bp;
 
-typedef struct Block
-{ 
-	char buf[516];
-	struct Block *next;
-	int id;
-}fBlock;
-typedef struct ARG
-{
-	int serverfd;
-	struct sockaddr_in clientaddr;
-	struct sockaddr_in *serveraddr;
-	int addrlen;
-}Arg;
 
-fBlock *full,*empty,*sending;
-int total = 0;
-
-fBlock*  initblock(int maxsize)
+int  initblock(int maxsize)
 {
 	int i;
-	fBlock *p, *q;
+	fBlock *p,*q;
 	p = (fBlock*)malloc(sizeof(fBlock)*maxsize);
-	full = p;
-	empty = p;
-	sending = p;
 	if(p <= 0)
 	{
 		printf("InitBlock Error!\n");
-		return p;
+		return -1;
 	}
+	bp->block = p;
+	bp->full = p;
+	bp->empty = p;
+	bp->sending = p;
 	q = p;
 	for(i = 0; i < maxsize-1; i++)
 	{
@@ -46,23 +24,28 @@ fBlock*  initblock(int maxsize)
 		q = q->next;
 	}
 	q->next = p;
-	return p;
+	bp->maxsize = maxsize;
+	bp->total = 0;
+	sem_init(&bp->mutex, 0, 1);
+	sem_init(&bp->blocks, 0, maxsize);
+	sem_init(&bp->packets, 0, 0);
+	return 0;
 }
 
-int initsocket(struct sockaddr_in *serveraddr, int *serverfd)
+int initsocket(Arg *arg)
 {
-	*serverfd = socket(PF_INET, SOCK_DGRAM, 0);
-	bzero(serveraddr, sizeof(struct sockaddr_in));
-	serveraddr->sin_family = AF_INET;
-	serveraddr->sin_addr.s_addr = htonl(INADDR_ANY);
-	serveraddr->sin_port = htons(SERVER_PORT);
+	arg->serverfd = socket(PF_INET, SOCK_DGRAM, 0);
+	bzero(&arg->serveraddr, sizeof(struct sockaddr_in));
+	arg->serveraddr.sin_family = AF_INET;
+	arg->serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	arg->serveraddr.sin_port = htons(SERVER_PORT);
+	arg.addrlen = sizeof(struct sockaddr_in);
 	return 0;
 }
 
 int fileopen(const char filename[])
 {
 	int fid;
-	printf("%s\n", filename);
 	fid = open(filename, O_RDONLY);
 	return fid;
 }
@@ -84,7 +67,7 @@ unsigned long get_file_size(const char *path)
 
 int fileread(const int fid, const int id, char block[])
 {
-	char buf[512];
+	char buf[BUFFERSIZE];
 	int bufsize = sizeof(buf);
 	int read_num = 0;
 	
@@ -93,13 +76,13 @@ int fileread(const int fid, const int id, char block[])
 	if (read_num < 0)
 	{
 		printf("Fileread %d Error", id);
-		return -1;
+		return read_num;
 	}
 	else if(read_num = 0)
 	{
+		printf("Touch the end of the file, id = %d.\n", id);
 		return 0;
 	}
-	sprintf(block,"%d%s", id, buf);
 	printf("Block %d is ready\n", id);
 	return read_num;
 }	
@@ -111,36 +94,47 @@ void fload(void* pfid)
 	int id = 1;
 	while(1)
 	{
-		while(empty->next == full);
-		read_num = fileread(fid, id, empty->buf);
+		P(&bp->blocks);
+		read_num = fileread(fid, id, empty->block->packet.buf);
 		if(read_num == 0) break;
-		empty->id = id;
-		empty = empty->next;
+		bp->empty->block->packet.id = id;
+		P(&bp->mutex);
+		bp->empty = bp->empty->next;
+		V(&bp->mutex);
+		V(&bp->packets);
 		id++;
 	}
 	total = id-1;
 	return;
-	
 }
 
 void blocksend(void* parg)
 {
 	Arg* arg = (Arg*)parg;
 	int send_num;
+	error_t = 0;
 	while(1)
 	{
-		while(sending == empty);
-		while(sending != full);
+		P(&bp->packets);
 		send_num = sendto(arg->serverfd, sending->buf, sizeof(sending->buf), 0, (struct sockaddr*)&arg->clientaddr, arg->addrlen);
 		if(send_num > 0)
 		{
+			error_t = 0;
 			printf("Send block [%d] success\n", sending->id);
+			P(&bp->mutex);
 			sending = sending->next;
+			P(&bp->mutex);
 		}
 		else
 		{
+			error_t++;
 			printf("Sending [%d] error!\n", sending->id);
-			continue;
+			if(error_t < MAXBLOCKTIME) 
+			{
+				V(&bp->packets);
+				continue;
+			}
+			else return;
 		}
 	}
 	return;
@@ -149,22 +143,22 @@ void blocksend(void* parg)
 void recvACK(void* parg)
 {
 	Arg* arg = (Arg*) parg;
-	fBlock* fblock;
 	pthread_t pid1, pid2; 
 	int fid;
+	int recv_num;
+	int send_num;
 	char buf[128];
 	char filename[128];
 	unsigned long filesize;
 
 	memset(buf, 0, 128);
 	memset(filename, 0, 128);
-	printf("recv %s from %s is %d\n", buf, inet_ntoa(arg->clientaddr.sin_addr), arg->addrlen);
 
-	int recv_num = recvfrom(arg->serverfd, buf, 128, 0, 
+	recv_num = recvfrom(arg->serverfd, buf, 128, 0, 
 			(struct sockaddr*)&arg->clientaddr, &arg->addrlen);
 
-	printf("%d\n",recv_num);
-	printf("recv %s from %s is %d\n", buf, inet_ntoa(arg->clientaddr.sin_addr), arg->addrlen);
+	printf("recv %d from %s is %s\n", recv_num, 
+			inet_ntoa(arg->clientaddr.sin_addr), buf);
 
 	sprintf(filename,"./%s",buf);
 	fid = fileopen(filename);
@@ -195,7 +189,7 @@ void recvACK(void* parg)
 	sendto(arg->serverfd, &filesize, sizeof(unsigned long), 0, 
 			(struct sockaddr*)&arg->clientaddr, sizeof(struct sockaddr_in));
 
-	fblock = initblock(11);
+	initblock(11);
 
 	if(pthread_create(&pid1, NULL, (void *)fload, (void *)fid) != 0)
 	{
@@ -238,21 +232,20 @@ void recvACK(void* parg)
 
 int main(int argc, char** argv)
 {
-	struct sockaddr_in serveraddr;
-	int serverfd;
 	pthread_t pid;
 	Arg arg;
-	initsocket(&serveraddr, &serverfd);
-	arg.serverfd = serverfd;
-	arg.addrlen = sizeof(struct sockaddr_in);
-	//arg.serveraddr = *serveraddr;
-	bind(serverfd, (struct sockaddr*)&serveraddr, sizeof(serveraddr));
+	block_buf blockbuf;
+
+	bp = &blockbuf;
+	initsocket(&arg);
+
+	bind(arg->serverfd, (struct sockaddr*)&serveraddr, sizeof(serveraddr));
 	if(pthread_create(&pid, NULL, (void*)recvACK, (void*)&arg) != 0)
 	{
 		printf("Pthread_create recvACK error\n");
-		return -2;
+		return -1;
 	}
 	pthread_join(pid, NULL);
-	close(serverfd);
+	close(arg->serverfd);
 	return 0;
 }
