@@ -22,7 +22,8 @@ void blockrecv(void* parg)
 		if(id == p->id)
 		{
 			printf("recv [%d] success.\n",id);
-			strncpy(bp->empty->packet.buf, p->buf, BUFFERSIZE);
+			memset(bp->empty->packet.buf, 0, BUFFERSIZE);
+			memcpy(bp->empty->packet.buf, p->buf, BUFFERSIZE);
 			bp->empty->packet.size = p->size;
 			ack = id;
 			P(&bp->mutex_e);
@@ -58,7 +59,7 @@ void fw(void* pfid)
 		P(&bp->packets);
 		filewrite(fid, bp->full->packet.buf, bp->full->packet.size);
 		P(&bp->mutex_f);
-		memset(bp->full->packet.buf, 0, BUFFERSIZE);
+		//memset(bp->full->packet.buf, 0, BUFFERSIZE);
 		bp->full->packet.id = 0;
 		bp->full = bp->full->next;
 		V(&bp->mutex_f);

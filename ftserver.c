@@ -26,23 +26,24 @@ void fload(void* pfid)
 void blocksend(void* parg)
 {
 	Arg* arg = (Arg*)parg;
-	int send_num;
+	int send_num, send_id;
 	fBlock *p;
 	int error_t = 0;
 	while(1)
 	{
 		P(&bp->packets);
 		P(&bp->ack);
-		acknum--;
-		printf("acknum is %d\n", acknum);
+		//acknum--;
+		//printf("acknum is %d\n", acknum);
 		P(&bp->mutex_s);
 		p = bp->sending;
 		V(&bp->mutex_s);
+		send_id = p->packet.id;
 		send_num = sendto(arg->serverfd, &p->packet, sizeof(p->packet), 0, (struct sockaddr*)&arg->clientaddr, arg->addrlen);
 		if(send_num > 0)
 		{
 			error_t = 0;
-			printf("Send block [%d] success\n", p->packet.id);
+			printf("==> Send block [%d] success\n", send_id);
 			P(&bp->mutex_s);
 			bp->sending = bp->sending->next;
 			V(&bp->mutex_s);
@@ -73,7 +74,6 @@ void recvACK(void* parg)
 	int fid;
 	int recv_num;
 	int send_num;
-	int time_s,time_e;
 	char buf[128];
 	char filename[128];
 	unsigned long filesize;
@@ -112,8 +112,7 @@ void recvACK(void* parg)
 			(struct sockaddr*)&arg->clientaddr, arg->addrlen);
 	
 	initblock(bp, BLOCK_BUF_SIZE);
-	bp->total = (filesize%512 == 0)?(filesize/512):(filesize/512 + 1);
-	time_s = (int)clock();
+	bp->total = (filesize%BUFFERSIZE == 0)?(filesize/BUFFERSIZE):(filesize/BUFFERSIZE + 1);
 	if(pthread_create(&pid1, NULL, (void *)fload, (void *)fid) != 0)
 	{
 		printf("Pthread_create fload error\n");
@@ -133,12 +132,12 @@ void recvACK(void* parg)
 		recvfrom(arg->serverfd, &ack, 4, 0, 
 				(struct sockaddr*)&arg->clientaddr, &arg->addrlen);
 		//How to resend		
-		printf("receive ack [%d]\n", ack);
-		printf("buf is 0x%x\n", ack);
+		printf("<== receive ack [%d]\n", ack);
 		if (bp->full->packet.id == ack)
 		{
 			if( ack == bp->total)
 			{
+				printf("ack == total\n");
 				break;
 			}
 			while( bp->full->packet.id == ack)
@@ -151,12 +150,13 @@ void recvACK(void* parg)
 				V(&bp->blocks);
 			}
 			
-			acknum++;
-			printf("acknum is %d\n", acknum);
+			//acknum++;
+			//printf("acknum is %d\n", acknum);
 			V(&bp->ack);
 		}
 		else
 		{
+			printf("Resend %d\n", bp->full->packet.id);
 			//fBlock *p, *q;
 			//q = bp->full;
 			P(&bp->mutex_s);
@@ -171,21 +171,22 @@ void recvACK(void* parg)
 			V(&bp->ack);
 		}
 	}
-	time_e = (int)clock();
 	close(fid);
 	freeblock(bp);
 	printf("Transelate complete!\n");
-	printf("Total cost:%d ms.\n", time_e-time_s);
 	return;
 }
 
 int main(int argc, char** argv)
 {
+	time_t time_s,time_e;
 	pthread_t pid;
 	Arg arg;
 	block_buf blockbuf;
 
 	bp = &blockbuf;
+
+	time_s = time(0);
 	initsocket(&arg);
 
 	bind(arg.serverfd, (struct sockaddr*)&arg.serveraddr, arg.addrlen);
@@ -196,5 +197,7 @@ int main(int argc, char** argv)
 	}
 	pthread_join(pid, NULL);
 	close(arg.serverfd);
+	time_e = time(0);
+	printf("total cost : %.0f s \n", difftime(time_e, time_s));
 	return 0;
 }
