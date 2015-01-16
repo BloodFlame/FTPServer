@@ -15,7 +15,7 @@ int  initblock(block_buf *bp, int maxsize)
 	p = (fBlock*)malloc(sizeof(fBlock)*maxsize);
 	if(p <= 0)
 	{
-		printf("InitBlock Error!\n");
+		//printf("InitBlock Error!\n");
 		return -1;
 	}
 	bp->block = p;
@@ -96,7 +96,7 @@ int fileread(const int fid, const int id, char buf[])
 		printf("Touch the end of the file, id = %d.\n", id);
 		return 0;
 	}
-	printf("Block %d is ready\n", id);
+	//printf("Block %d is ready\n", id);
 	return read_num;
 }
 

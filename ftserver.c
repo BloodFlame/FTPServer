@@ -1,7 +1,8 @@
 #include "ft.h"
 
 block_buf* bp;
-int acknum = 1;
+
+/*Load data from file to the buffer*/
 void fload(void* pfid)
 {
 	int fid = (int)pfid;
@@ -23,6 +24,7 @@ void fload(void* pfid)
 	return;
 }
 
+/*Send packet to the client*/
 void blocksend(void* parg)
 {
 	Arg* arg = (Arg*)parg;
@@ -43,7 +45,7 @@ void blocksend(void* parg)
 		if(send_num > 0)
 		{
 			error_t = 0;
-			printf("==> Send block [%d] success\n", send_id);
+			//printf("==> Send block [%d] success\n", send_id);
 			P(&bp->mutex_s);
 			bp->sending = bp->sending->next;
 			V(&bp->mutex_s);
@@ -51,7 +53,7 @@ void blocksend(void* parg)
 		else
 		{
 			error_t++;
-			printf("Sending [%d] error!\n", p->packet.id);
+			//printf("Sending [%d] error!\n", p->packet.id);
 			if(error_t < MAXBLOCKTIME) 
 			{
 				V(&bp->packets);
@@ -67,6 +69,7 @@ void blocksend(void* parg)
 	return;
 }
 
+/*Receive the request and ack*/
 void recvACK(void* parg)
 {
 	Arg* arg = (Arg*) parg;
@@ -132,12 +135,12 @@ void recvACK(void* parg)
 		recvfrom(arg->serverfd, &ack, 4, 0, 
 				(struct sockaddr*)&arg->clientaddr, &arg->addrlen);
 		//How to resend		
-		printf("<== receive ack [%d]\n", ack);
+		//printf("<== receive ack [%d]\n", ack);
 		if (bp->full->packet.id == ack)
 		{
 			if( ack == bp->total)
 			{
-				printf("ack == total\n");
+				//printf("ack == total\n");
 				break;
 			}
 			while( bp->full->packet.id == ack)
@@ -177,6 +180,7 @@ void recvACK(void* parg)
 	return;
 }
 
+/*Main progress*/
 int main(int argc, char** argv)
 {
 	time_t time_s,time_e;

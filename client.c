@@ -2,6 +2,7 @@
 
 block_buf* bp;
 
+/*Receive packet from the server and send ack*/
 void blockrecv(void* parg)
 {
 	Arg* arg = (Arg*)parg;
@@ -21,7 +22,7 @@ void blockrecv(void* parg)
 		p = (fPacket*)buf;
 		if(id == p->id)
 		{
-			printf("recv [%d] success.\n",id);
+			//printf("recv [%d] success.\n",id);
 			memset(bp->empty->packet.buf, 0, BUFFERSIZE);
 			memcpy(bp->empty->packet.buf, p->buf, BUFFERSIZE);
 			bp->empty->packet.size = p->size;
@@ -39,7 +40,7 @@ void blockrecv(void* parg)
 		}
 		if(count == ACK_DELAY)
 		{
-			printf("send ack %d\n", ack);
+			//printf("send ack %d\n", ack);
 			sendto(arg->clientfd, &ack, 4, 0, 
 					(struct sockaddr*)&arg->serveraddr, arg->addrlen);
 			count = 0;
@@ -49,6 +50,7 @@ void blockrecv(void* parg)
 	return;
 }
 
+/*write the data into the file*/
 void fw(void* pfid)
 {
 	int fid = (int)pfid;
@@ -64,13 +66,15 @@ void fw(void* pfid)
 		bp->full = bp->full->next;
 		V(&bp->mutex_f);
 		V(&bp->blocks);
-		printf("write %d complete\n", count+1);
+		//printf("write %d complete\n", count+1);
+		printf("******************** %d%\n", (count+1)/(bp->total/100));
 		count++;
 	}
-	printf("RECEIV FILE COMPLETE!\n");
+	printf("RECEIVE FILE COMPLETE!\n");
 	return;
 }
 
+/*Send request to the server*/
 void sendACK(void* parg)
 {
 	Arg* arg = (Arg*) parg;
@@ -126,21 +130,24 @@ void sendACK(void* parg)
 	pthread_join(pid2, NULL);
 	close(fid);
 	freeblock(bp);
-	printf("Receive cmplete!\n");
+	printf("Receive complete!\n");
 	return;
 
 }
 
+/*Main progress*/
 int main(int argc, char** argv)
 {
 	Arg arg;
+	char out[20];
+	time_t time_start, time_end;
 	block_buf blockbuf;
 	bp = &blockbuf;
 	int clientfd;
 	pthread_t pid;
 	char serverip[50] = "127.0.0.1";
 	char defaultname[128] = "./";
-
+	time_start = time(NULL);
 	if(argc < 2)
 	{
 		printf("Please input the target filename\n");
@@ -169,5 +176,6 @@ int main(int argc, char** argv)
 	
 	pthread_join(pid, NULL);
 	close(clientfd);
-	
+	time_end = time(NULL);
+	printf("Time cost : %.0f s \n",difftime(time_end, time_start));
 	return 0;}
