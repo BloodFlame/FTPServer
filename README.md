@@ -1,5 +1,5 @@
 ## FTPServer
-A FTPServer for transfering an file whose size is 1G.
+A FTPServer for transfering a file whose size is 1G.
 
 The project include "ft.h ft.c ftserver.c client.c".
 
